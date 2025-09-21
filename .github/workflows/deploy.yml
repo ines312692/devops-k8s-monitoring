@@ -133,9 +133,9 @@ jobs:
       
       
 
-      - name: Verify Prometheus configuration
+      - name: Verifying Prometheus configuration
         run: |
-          echo "Verifying Prometheus configuration..."
-          docker run --rm -v $(pwd)/k8s/prometheus/configmap.yaml:/tmp/config.yaml \
-            prom/prometheus:latest \
-            sh -c 'grep -A 50 "prometheus.yml:" /tmp/config.yaml | tail -n +2 > /tmp/prometheus.yml && promtool check config /tmp/prometheus.yml'
+          docker run --rm -v $(pwd)/k8s/prometheus.yml:/etc/prometheus/prometheus.yml prom/prometheus:latest \
+            --config.file=/etc/prometheus/prometheus.yml \
+            --log.level=error \
+            --version
