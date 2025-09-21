@@ -133,9 +133,4 @@ jobs:
       
       
 
-      - name: Verifying Prometheus configuration
-        run: |
-          docker run --rm -v $(pwd)/k8s/prometheus.yml:/etc/prometheus/prometheus.yml prom/prometheus:latest \
-            --config.file=/etc/prometheus/prometheus.yml \
-            --log.level=error \
-            --version
+      
