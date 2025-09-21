@@ -118,15 +118,19 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Validate Kubernetes manifests (offline)
+      - name: Start minikube
+        uses: medyagh/setup-minikube@master
+        with:
+          minikube-version: 1.31.2
+          kubernetes-version: v1.28.0
+
+      - name: Validate Kubernetes manifests
         run: |
           echo "Validating Kubernetes manifests..."
           for file in $(find k8s -name '*.yaml'); do
-            if [[ -f "$file" ]]; then
-              echo "Validating $file"
-              kubectl apply --dry-run=client --validate=false -f "$file"
-            fi
+            kubectl apply --dry-run=client -f "$file"
           done
+      
       
 
       - name: Verify Prometheus configuration
