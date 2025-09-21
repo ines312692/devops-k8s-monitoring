@@ -1,0 +1,136 @@
+name: DevOps Pipeline with Kubernetes
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  APP_VERSION: ${{ github.sha }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+
+      - name: Install dependencies
+        run: |
+          cd app
+          npm install
+
+      - name: Run tests (simulation)
+        run: |
+          echo "Running tests..."
+          # Ici vous pourriez ajouter vos vrais tests
+          # npm test
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Build Docker image
+        run: |
+          docker build -t devops-app:${{ env.APP_VERSION }} ./app
+          docker tag devops-app:${{ env.APP_VERSION }} devops-app:latest
+
+      - name: Test Docker image
+        run: |
+          docker run -d -p 3000:3000 --name test-app devops-app:latest
+          sleep 10
+          curl -f http://localhost:3000/health || exit 1
+          docker stop test-app
+          docker rm test-app
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Start minikube
+        uses: medyagh/setup-minikube@master
+        with:
+          minikube-version: 1.31.2
+          kubernetes-version: v1.28.0
+
+      - name: Build image in minikube
+        run: |
+          eval $(minikube docker-env)
+          docker build -t devops-app:${{ env.APP_VERSION }} ./app
+          docker tag devops-app:${{ env.APP_VERSION }} devops-app:latest
+
+      - name: Deploy to Kubernetes
+        run: |
+          kubectl apply -f k8s/namespace.yaml
+          kubectl apply -f k8s/prometheus/rbac.yaml
+          kubectl apply -f k8s/prometheus/configmap.yaml
+          kubectl apply -f k8s/prometheus/deployment.yaml
+          kubectl apply -f k8s/prometheus/service.yaml
+          kubectl apply -f k8s/grafana/pvc.yaml
+          kubectl apply -f k8s/grafana/deployment.yaml
+          kubectl apply -f k8s/grafana/service.yaml
+          
+          # Mise à jour de l'image de l'application
+          sed -i "s|image: devops-app:latest|image: devops-app:${{ env.APP_VERSION }}|" k8s/app/deployment.yaml
+          kubectl apply -f k8s/app/deployment.yaml
+          kubectl apply -f k8s/app/service.yaml
+
+      - name: Wait for deployments
+        run: |
+          kubectl wait --for=condition=ready pod -l app=prometheus -n monitoring --timeout=300s
+          kubectl wait --for=condition=ready pod -l app=grafana -n monitoring --timeout=300s
+          kubectl wait --for=condition=ready pod -l app=devops-app -n monitoring --timeout=300s
+
+      - name: Health check
+        run: |
+          minikube service devops-app-service -n monitoring --url > service_url.txt
+          APP_URL=$(cat service_url.txt)
+          echo "Testing application at: $APP_URL"
+          curl -f $APP_URL/health || exit 1
+          echo "Health check passed!"
+
+      - name: Get service URLs
+        run: |
+          echo "=== Services URLs ==="
+          echo "Application: $(minikube service devops-app-service -n monitoring --url)"
+          echo "Prometheus: $(minikube service prometheus-service -n monitoring --url)"
+          echo "Grafana: $(minikube service grafana-service -n monitoring --url)"
+
+      - name: Display pod status
+        run: |
+          kubectl get pods -n monitoring
+          kubectl get services -n monitoring
+
+  monitoring-setup:
+    needs: deploy
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Validate Kubernetes manifests
+        run: |
+          echo "Validating Kubernetes manifests..."
+          for file in k8s/**/*.yaml; do
+            if [[ -f "$file" ]]; then
+              echo "Validating $file"
+              kubectl --dry-run=client apply -f "$file"
+            fi
+          done
+
+      - name: Verify Prometheus configuration
+        run: |
+          echo "Verifying Prometheus configuration..."
+          docker run --rm -v $(pwd)/k8s/prometheus/configmap.yaml:/tmp/config.yaml \
+            prom/prometheus:latest \
+            sh -c 'grep -A 50 "prometheus.yml:" /tmp/config.yaml | tail -n +2 > /tmp/prometheus.yml && promtool check config /tmp/prometheus.yml'
