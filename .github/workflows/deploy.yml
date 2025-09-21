@@ -1,10 +1,7 @@
 name: DevOps Pipeline with Kubernetes
 
 on:
-  push:
-    branches: [ main, develop ]
-  pull_request:
-    branches: [ main ]
+  workflow_dispatch:
 
 env:
   APP_VERSION: ${{ github.sha }}
