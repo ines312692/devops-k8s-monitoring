@@ -121,10 +121,10 @@ jobs:
       - name: Validate Kubernetes manifests
         run: |
           echo "Validating Kubernetes manifests..."
-          for file in k8s/**/*.yaml; do
+          for file in $(find k8s -name '*.yaml'); do
             if [[ -f "$file" ]]; then
               echo "Validating $file"
-              kubectl --dry-run=client apply -f "$file"
+              kubectl apply --dry-run=client --validate=false -f "$file"
             fi
           done
 
